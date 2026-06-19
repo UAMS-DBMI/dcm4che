@@ -51,9 +51,13 @@ import javax.imageio.stream.FileImageInputStream;
 import javax.imageio.stream.FileImageOutputStream;
 import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 import java.util.*;
 import java.util.function.Predicate;
@@ -365,20 +369,7 @@ public class Dcm2Jpg {
                         ? main::readImageFromImageInputStream
                         : main::readImageFromDicomInputStream));
 
-            @SuppressWarnings("unchecked")
-            final List<String> argList = cl.getArgList();
-            int argc = argList.size();
-            if (argc < 2)
-                throw new ParseException(rb.getString("missing"));
-            File dest = new File(argList.get(argc-1));
-            if ((argc > 2 || new File(argList.get(0)).isDirectory())) {
-                dest.mkdirs();
-                if (!dest.isDirectory())
-                    throw new ParseException(
-                            MessageFormat.format(rb.getString("nodestdir"), dest));
-            }
-            for (String src : argList.subList(0, argc-1))
-                main.mconvert(new File(src), dest);
+            main.process(System.in);
         } catch (ParseException e) {
             System.err.println("dcm2jpg: " + e.getMessage());
             System.err.println(rb.getString("try"));
@@ -387,6 +378,39 @@ public class Dcm2Jpg {
             System.err.println("dcm2jpg: " + e.getMessage());
             e.printStackTrace();
             System.exit(2);
+        }
+    }
+
+    /**
+     * Reads lines of {@code <dicom-file>,<jpeg-file>} from the given stream and
+     * converts each pair as soon as the line is received. Returns (terminating
+     * the process) on end of stream or on a line equal to {@code "exit"}.
+     * Termination on SIGTERM is handled by the JVM's default behavior.
+     */
+    private void process(InputStream in) throws IOException {
+        BufferedReader reader =
+                new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        String line;
+        while ((line = reader.readLine()) != null) {
+            line = line.trim();
+            if (line.isEmpty())
+                continue;
+            if (line.equals("exit"))
+                break;
+            int comma = line.indexOf(',');
+            if (comma < 0) {
+                System.out.println(
+                        MessageFormat.format(rb.getString("badinput"), line));
+                System.out.flush();
+                continue;
+            }
+            File src = new File(line.substring(0, comma).trim());
+            File dest = new File(line.substring(comma + 1).trim());
+            File parent = dest.getParentFile();
+            if (parent != null)
+                parent.mkdirs();
+            mconvert(src, dest);
+            System.out.flush();
         }
     }
 
